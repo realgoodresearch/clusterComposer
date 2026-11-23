@@ -35,11 +35,13 @@ Description: Generates bespoke spatial sampling frames from building
 License: GPL (>= 3)
 Encoding: UTF-8
 LazyData: true
+SystemRequirements: GDAL, GEOS, PROJ, GLPK
 Imports: 
     data.table,
     dendextend,
     dplyr,
     igraph,
+    lwgeom,
     rgeoda,
     sf,
     stars

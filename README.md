@@ -8,6 +8,16 @@ census frames.
 
 ## Installation
 
+### Linux system dependencies
+
+On Ubuntu or Debian, install the required system libraries before
+installing `clusterComposer`:
+
+``` bash
+sudo apt update
+sudo apt install libgdal-dev libgeos-dev libproj-dev libglpk-dev
+```
+
 You can install the development version of `clusterComposer` like so:
 
 ``` r

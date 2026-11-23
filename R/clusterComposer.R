@@ -1,5 +1,5 @@
 utils::globalVariables(c(
-  ".", ".N", ":=", "ID", "available_cores", "cid",
+  ".", ".N", ":=", "ID", "cid",
   "group_id", "overlap_group", "pop", "pop_building"
 ))
 
@@ -19,6 +19,7 @@ utils::globalVariables(c(
 #' @param n_cores Numeric, single number. Default is 1. The number of computer cores you would like for processing. Recommend using your total number of cores minus 1. Use parallel::detectCores() to find the total number of cores available on your computer.
 #' @param delete_temp_files Logical. Default is TRUE. If `TRUE`, intermediate files are deleted when the function exits. If `FALSE`, they are retained.
 #' @import dplyr
+#' @importFrom data.table as.data.table
 #' @import rgeoda
 #' @import stars
 #' @import sf
@@ -42,8 +43,9 @@ clusterComposer <- function(
 ){
 
   # check number of cores specified by user does not exceed those available
-  if(n_cores > parallel::detectCores()){
-    message("Requested ", n_cores, " cores, but only ", parallel::detectCores(), " are available. Using ", parallel::detectCores(), " cores.")
+  available_cores <- parallel::detectCores()
+  if(n_cores > available_cores){
+    message("Requested ", n_cores, " cores, but only ", available_cores, " are available. Using ", available_cores, " cores.")
     n_cores <- available_cores
   }
 
@@ -76,6 +78,7 @@ clusterComposer <- function(
     library(stars)
     library(dendextend)
     library(dplyr)
+    library(data.table)
     library(rgeoda)
     library(igraph)
   })
@@ -112,7 +115,7 @@ clusterComposer <- function(
         final_polys <- rbind(final_polys, st_sf(ID = 1L, bldCount = nrow(bf), pop = sum(bf$pop_building), area = as.numeric(st_area(geom)), section_ID = section, geometry = geom))
       }
       final_polys_path <- file.path(temp_folder,paste0(run_id, "_", section, ".gpkg"))
-      st_write(final_polys, final_polys_path)
+      st_write(final_polys, final_polys_path, append = FALSE)
       return()
     }
 
@@ -806,15 +809,15 @@ clusterComposer <- function(
 
     # save section clusters
     final_polys_path <- file.path(temp_folder,paste0(run_id, "_", section, ".gpkg"))
-    st_write(final_polys, final_polys_path)
+    st_write(final_polys, final_polys_path, append = FALSE)
 
-  }))
+  }, chunk.size = 1L))
 
   temp_files <- list.files(temp_folder,pattern = "\\.gpkg$",full.names = TRUE)
   cluster_polys <- lapply(temp_files, sf::st_read, quiet = TRUE)
   cluster_polys <- do.call(rbind, cluster_polys)
   cluster_polys$ID <- 1:nrow(cluster_polys)
   cluster_polys_path <- file.path(output_file_path,paste0(run_id, "_clusters.gpkg"))
-  st_write(cluster_polys, cluster_polys_path)
+  st_write(cluster_polys, cluster_polys_path, append = FALSE)
 
 }
