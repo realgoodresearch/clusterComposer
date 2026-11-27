@@ -1,5 +1,5 @@
 ---
-title: "Creating a Spatial Sampling Frame for Kolkata"
+title: "Full Workflow for Creating a Spatial Sampling Frame for Kolkata"
 output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{Creating a Spatial Sampling Frame for Kolkata}
@@ -436,13 +436,6 @@ an error occurs.
 ```{r run-cluster-composer}
 
 library(sf)
-library(stars)
-library(dendextend)
-library(dplyr)
-library(rgeoda)
-library(igraph)
-library(parallel)
-
 library(clusterComposer)
 
 # read in Area of Interest (aoi)

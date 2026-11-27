@@ -8,16 +8,6 @@ census frames.
 
 ## Installation
 
-### Linux system dependencies
-
-On Ubuntu or Debian, install the required system libraries before
-installing `clusterComposer`:
-
-``` bash
-sudo apt update
-sudo apt install libgdal-dev libgeos-dev libproj-dev libglpk-dev
-```
-
 You can install the development version of `clusterComposer` like so:
 
 ``` r
@@ -30,10 +20,21 @@ pak::pak("cadooley/clusterComposer",dependencies = TRUE)
 
 # once installed, load the clusterComposer package 
 library(clusterComposer)
-
-# if helpful, explore vignettes for a full walk through of downloading and preparing data followed by running the cluster composer function to create a sampling frame
-vignette("clusterComposer", package = "clusterComposer")
 ```
+
+### Linux users
+
+Most users can install `clusterComposer` directly using the instructions
+above. On Ubuntu or Debian systems, you need to install the required
+system libraries before installing `clusterComposer`:
+
+``` bash
+sudo apt update
+sudo apt install libgdal-dev libgeos-dev libproj-dev libglpk-dev
+```
+
+Once these are installed, follow the `clusterComposer` package
+installation steps above.
 
 ## Citation
 
@@ -57,16 +58,16 @@ associated population count. If building footprints are not available,
 the geometries could be buffered point locations converted into
 polygons. The building footprints file must be in geopackage format.
 
-Users must specify the name of the aoi sf object (`aoi`), the file path
-for the building footprints geopackage (`bf_file_path`), a run ID that
-forms the name of the output file (`run_id`), and the file path for the
-output file (`output_file_path`). It is recommended that users specify a
-suitable number of cores (`n_cores`) as the function splits processing
-across available computing cores to reduce running time. If needed, the
-target population per cluster (`pop_per_EZ`) can be specified. The
-default is 250 people per cluster. Note that if this is changed, users
-should also change the minimum (`min_pop_per_EZ`) and maximum
-(`max_pop_per_EZ`) population per cluster values too.
+Users must specify the name of the “area of interest” sf object (`aoi`),
+the file path for the building footprints geopackage (`bf_file_path`), a
+run ID that forms the name of the output file (`run_id`), and the file
+path for the output file (`output_file_path`). It is recommended that
+users specify a suitable number of computing cores (`n_cores`) as the
+function splits processing across available cores to reduce running
+time. If needed, the target population per cluster (`pop_per_EZ`) can be
+specified. The default is 250 people per cluster. Note that if this is
+changed, users should also change the minimum (`min_pop_per_EZ`) and
+maximum (`max_pop_per_EZ`) population per cluster values accordingly.
 
 While `clusterComposer` is under development, we recommend that
 `delete_temp_files` is set to `FALSE`. If set to `TRUE`, intermediate
@@ -99,6 +100,39 @@ clusterComposer(aoi=AOI,
 )
 ```
 
+## Vignettes
+
+This R package contains two vignettes:
+
+- Creating Sampling Frame Clusters for Example Neighbourhoods in
+  Guatemala City
+- Full Workflow for Creating a Spatial Sampling Frame for Kolkata
+
+The vignette for Neighbourhoods in Guatemala City provides a guide on
+how to run `clusterComposer` to create sampling frames for small example
+areas. It also demonstrates how `clusterComposer` performs across
+contrasting urban forms and for different population per cluster
+settings. All data for this vignette is provided within the R package
+and is designed to get users familiar with running the `clusterComposer`
+function.
+
+The vignette for creating the Kolkata sampling frame is designed to
+demonstrate the full workflow of downloading and preparing data, running
+`clusterComposer` to generate a frame for a whole city and working with
+the output sampling frame geopackage file. Completing all steps in this
+vignette will take some time (~1-2 hours).
+
+To access the vignettes use the following code.
+
+``` r
+# load the package
+library(clusterComposer)
+
+# use the following code to open a html page in your web browser that lists all available vignettes and provides links to open each one
+system.file("doc", package = "clusterComposer")
+browseVignettes("clusterComposer")
+```
+
 ## Method overview
 
 The clusterComposer function performs the steps outlined below. Here is
@@ -108,10 +142,10 @@ November 2026).
 
 <figure>
 <img src="man/figures/Kolkata_section46_bfs.png"
-alt="Example building footprints from Kolkata, India. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors.*" />
+alt="Example building footprints from Kolkata, India. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors." />
 <figcaption aria-hidden="true">Example building footprints from Kolkata,
 India. Data attribution: Overture Maps Foundation, overturemaps.org. ©
-OpenStreetMap contributors.*</figcaption>
+OpenStreetMap contributors.</figcaption>
 </figure>
 
  
@@ -124,10 +158,10 @@ buffer distance.
 
 <figure>
 <img src="man/figures/Kolkata_section46_step1_buffering.png"
-alt="Step 1: create collections of buildings in close proximity. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors.*" />
+alt="Step 1: create collections of buildings in close proximity. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors." />
 <figcaption aria-hidden="true">Step 1: create collections of buildings
 in close proximity. Data attribution: Overture Maps Foundation,
-overturemaps.org. © OpenStreetMap contributors.*</figcaption>
+overturemaps.org. © OpenStreetMap contributors.</figcaption>
 </figure>
 
  
@@ -139,10 +173,10 @@ intertwined).
 
 <figure>
 <img src="man/figures/Kolkata_section46_step2_minarearect.png"
-alt="Step 2: create block shapes around building collections. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors.*" />
+alt="Step 2: create block shapes around building collections. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors." />
 <figcaption aria-hidden="true">Step 2: create block shapes around
 building collections. Data attribution: Overture Maps Foundation,
-overturemaps.org. © OpenStreetMap contributors.*</figcaption>
+overturemaps.org. © OpenStreetMap contributors.</figcaption>
 </figure>
 
  
@@ -152,10 +186,10 @@ building collections to meet target population per cluster.
 
 <figure>
 <img src="man/figures/Kolkata_section46_step3_hierclust.png"
-alt="Step 3: apply hierarchical clustering. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors.*" />
+alt="Step 3: apply hierarchical clustering. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors." />
 <figcaption aria-hidden="true">Step 3: apply hierarchical clustering.
 Data attribution: Overture Maps Foundation, overturemaps.org. ©
-OpenStreetMap contributors.*</figcaption>
+OpenStreetMap contributors.</figcaption>
 </figure>
 
  
@@ -165,18 +199,18 @@ clusters with the longest shared boundary.
 
 <figure>
 <img src="man/figures/Kolkata_section46_step4_spacescleanup.png"
-alt="Step 4: merge small inter-cluster spaces with suitable clusters. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors.*" />
+alt="Step 4: merge small inter-cluster spaces with suitable clusters. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors." />
 <figcaption aria-hidden="true">Step 4: merge small inter-cluster spaces
 with suitable clusters. Data attribution: Overture Maps Foundation,
-overturemaps.org. © OpenStreetMap contributors.*</figcaption>
+overturemaps.org. © OpenStreetMap contributors.</figcaption>
 </figure>
 
 <figure>
 <img src="man/figures/Kolkata_section46_step5_presteppop.png"
-alt="Post Step 4 population per cluster. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors.*" />
+alt="Post Step 4 population per cluster. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors." />
 <figcaption aria-hidden="true">Post Step 4 population per cluster. Data
 attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap
-contributors.*</figcaption>
+contributors.</figcaption>
 </figure>
 
  
@@ -189,11 +223,11 @@ the most spatially compact cluster is performed.
 
 <figure>
 <img src="man/figures/Kolkata_section46_step5_addlowpopclusts.png"
-alt="Step 5: combine any clusters below minimum population per cluster to a suitable neighbouring cluster. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors.*" />
+alt="Step 5: combine any clusters below minimum population per cluster to a suitable neighbouring cluster. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors." />
 <figcaption aria-hidden="true">Step 5: combine any clusters below
 minimum population per cluster to a suitable neighbouring cluster. Data
 attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap
-contributors.*</figcaption>
+contributors.</figcaption>
 </figure>
 
  
@@ -203,10 +237,10 @@ buildings and are sensible, i.e. not wobbly.
 
 <figure>
 <img src="man/figures/Kolkata_section46_step6_boundarycleanup.png"
-alt="Step 6: clean up cluster boundaries. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors.*" />
+alt="Step 6: clean up cluster boundaries. Data attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap contributors." />
 <figcaption aria-hidden="true">Step 6: clean up cluster boundaries. Data
 attribution: Overture Maps Foundation, overturemaps.org. © OpenStreetMap
-contributors.*</figcaption>
+contributors.</figcaption>
 </figure>
 
 ## References
