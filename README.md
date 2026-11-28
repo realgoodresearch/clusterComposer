@@ -76,6 +76,16 @@ results for completed sections can be used/reviewed if an error occurs.
 These can be found in the “temporary” folder inside the
 `output_file_path` directory.
 
+Before processing, `clusterComposer` records each section’s building
+count, population, and geometry complexity in
+`<run_id>_section_status.csv`. Use `warn_features_per_section` or
+`max_features_per_section` to flag or skip unusually large sections,
+and `section_timeout` to stop a section that runs too long without
+ending the main R session. A later call with `resume = TRUE` reuses valid
+temporary section outputs. If some sections fail, time out, or are
+skipped, `merge_partial = TRUE` writes a result from completed sections
+and `<run_id>_manifest.csv` records exactly what was included.
+
 Example running code:
 
 ``` r

@@ -37,6 +37,7 @@ Encoding: UTF-8
 LazyData: true
 SystemRequirements: GDAL, GEOS, PROJ, GLPK
 Imports: 
+    callr,
     data.table,
     dendextend,
     dplyr,
@@ -44,7 +45,7 @@ Imports:
     rgeoda,
     sf,
     stars
-RoxygenNote: 7.3.2
+RoxygenNote: 7.3.3
 Suggests: 
     knitr,
     rmarkdown,

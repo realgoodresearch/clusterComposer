@@ -729,6 +729,195 @@ utils::globalVariables(c(
 
 }
 
+.section_output_path <- function(temp_folder, run_id, section_id) {
+  file.path(temp_folder, paste0(run_id, "_", section_id, ".gpkg"))
+}
+
+.preflight_sections <- function(aoi, bf_file_path, run_id, temp_folder) {
+  rows <- lapply(aoi$section_id, function(section_id) {
+    aoi_section <- aoi[aoi$section_id == section_id, ]
+    buildings <- sf::st_read(
+      bf_file_path,
+      wkt_filter = sf::st_as_text(sf::st_geometry(aoi_section)),
+      quiet = TRUE
+    )
+    vertex_count <- if (nrow(buildings) == 0) {
+      0
+    } else {
+      sum(vapply(
+        sf::st_geometry(buildings),
+        function(geometry) nrow(sf::st_coordinates(geometry)),
+        integer(1)
+      ))
+    }
+    data.frame(
+      section_id = section_id,
+      feature_count = nrow(buildings),
+      population = sum(buildings$pop_building, na.rm = TRUE),
+      vertex_count = vertex_count,
+      start_time = NA_character_,
+      finish_time = NA_character_,
+      elapsed_seconds = NA_real_,
+      status = "pending",
+      error_message = NA_character_,
+      temp_output_path = .section_output_path(temp_folder, run_id, section_id),
+      resumed = FALSE,
+      included_in_merge = FALSE,
+      stringsAsFactors = FALSE
+    )
+  })
+  do.call(rbind, rows)
+}
+
+.write_section_status <- function(status, status_file) {
+  dir.create(dirname(status_file), recursive = TRUE, showWarnings = FALSE)
+  temporary_file <- tempfile(
+    pattern = paste0(basename(status_file), "-"),
+    tmpdir = dirname(status_file)
+  )
+  utils::write.csv(status, temporary_file, row.names = FALSE, na = "")
+  if (file.exists(status_file)) {
+    unlink(status_file)
+  }
+  if (!file.rename(temporary_file, status_file)) {
+    unlink(temporary_file)
+    stop("Could not update section status file: ", status_file, call. = FALSE)
+  }
+  invisible(status_file)
+}
+
+.validate_section_output <- function(path, section_id, expected_crs) {
+  if (!file.exists(path)) {
+    return(list(valid = FALSE, message = "Temporary output does not exist."))
+  }
+  result <- tryCatch(
+    sf::st_read(path, quiet = TRUE),
+    error = function(error) error
+  )
+  if (inherits(result, "error")) {
+    return(list(valid = FALSE, message = conditionMessage(result)))
+  }
+  required_columns <- c("ID", "bldCount", "pop", "area", "section_ID")
+  missing_columns <- setdiff(required_columns, names(result))
+  if (nrow(result) == 0) {
+    return(list(valid = FALSE, message = "Temporary output contains no features."))
+  }
+  if (length(missing_columns) > 0) {
+    return(list(
+      valid = FALSE,
+      message = paste("Temporary output is missing:", paste(missing_columns, collapse = ", "))
+    ))
+  }
+  if (any(result$section_ID != section_id)) {
+    return(list(valid = FALSE, message = "Temporary output has the wrong section_ID."))
+  }
+  if (any(sf::st_is_empty(result)) || any(!sf::st_is_valid(result))) {
+    return(list(valid = FALSE, message = "Temporary output has empty or invalid geometry."))
+  }
+  if (!isTRUE(sf::st_crs(result) == expected_crs)) {
+    return(list(valid = FALSE, message = "Temporary output has the wrong CRS."))
+  }
+  list(valid = TRUE, message = NA_character_)
+}
+
+.run_section_processes <- function(
+    status,
+    row_indices,
+    worker_arguments,
+    n_cores,
+    section_timeout,
+    status_file,
+    expected_crs) {
+  pending <- row_indices
+  active <- list()
+
+  start_section <- function(row_index) {
+    section_id <- status$section_id[row_index]
+    arguments <- worker_arguments
+    arguments$section <- section_id
+    if (file.exists(status$temp_output_path[row_index])) {
+      unlink(status$temp_output_path[row_index])
+    }
+    status$start_time[row_index] <<- format(Sys.time(), tz = "UTC", usetz = TRUE)
+    status$status[row_index] <<- "running"
+    .write_section_status(status, status_file)
+    process <- callr::r_bg(
+      func = function(arguments) do.call(.cluster_section, arguments),
+      args = list(arguments = arguments),
+      stdout = "|",
+      stderr = "|",
+      supervise = TRUE,
+      package = "clusterComposer"
+    )
+    list(
+      process = process,
+      row_index = row_index,
+      started_elapsed = proc.time()[["elapsed"]]
+    )
+  }
+
+  while (length(pending) > 0 || length(active) > 0) {
+    while (length(pending) > 0 && length(active) < n_cores) {
+      row_index <- pending[1]
+      pending <- pending[-1]
+      active[[as.character(status$section_id[row_index])]] <- start_section(row_index)
+    }
+
+    Sys.sleep(0.1)
+    for (key in names(active)) {
+      task <- active[[key]]
+      process <- task$process
+      row_index <- task$row_index
+      elapsed <- proc.time()[["elapsed"]] - task$started_elapsed
+
+      if (process$is_alive() && is.finite(section_timeout) && elapsed > section_timeout) {
+        process$kill()
+        process$wait(timeout = 5000)
+        status$status[row_index] <- "timeout"
+        status$error_message[row_index] <- paste0(
+          "Section exceeded timeout of ", section_timeout, " seconds."
+        )
+      } else if (!process$is_alive()) {
+        process_error <- tryCatch(
+          {
+            process$get_result()
+            NULL
+          },
+          error = function(error) conditionMessage(error)
+        )
+        if (is.null(process_error)) {
+          validation <- .validate_section_output(
+            status$temp_output_path[row_index],
+            status$section_id[row_index],
+            expected_crs
+          )
+          if (validation$valid) {
+            status$status[row_index] <- "completed"
+          } else {
+            status$status[row_index] <- "error"
+            status$error_message[row_index] <- validation$message
+          }
+        } else {
+          stderr <- paste(process$read_all_error(), collapse = "\n")
+          status$status[row_index] <- "error"
+          status$error_message[row_index] <- paste(
+            c(process_error, stderr[nzchar(stderr)]),
+            collapse = " | "
+          )
+        }
+      } else {
+        next
+      }
+
+      status$finish_time[row_index] <- format(Sys.time(), tz = "UTC", usetz = TRUE)
+      status$elapsed_seconds[row_index] <- elapsed
+      .write_section_status(status, status_file)
+      active[[key]] <- NULL
+    }
+  }
+  status
+}
+
 
 #' Generate Bespoke Spatial Sampling Frames from Buildings
 #'
@@ -745,6 +934,12 @@ utils::globalVariables(c(
 #' @param epsg Numeric, single number. Default is 3857. EPSG code for the projected coordinate reference system used for spatial calculations.
 #' @param n_cores Numeric, single number. Default is 1. The number of computer cores you would like for processing. Recommend using your total number of cores minus 1. Use parallel::detectCores() to find the total number of cores available on your computer.
 #' @param delete_temp_files Logical. Default is TRUE. If `TRUE`, intermediate files are deleted when the function exits. If `FALSE`, they are retained.
+#' @param warn_features_per_section Numeric. Warn before processing sections with more building features than this. Default is `Inf`.
+#' @param max_features_per_section Numeric. Skip sections with more building features than this. Default is `Inf`.
+#' @param section_timeout Numeric. Maximum processing time in seconds for each section. Default is `Inf`.
+#' @param resume Logical. If `TRUE`, reuse valid existing section outputs. Default is `FALSE`.
+#' @param merge_partial Logical. If `TRUE`, merge successful section outputs even when other sections fail, time out, or are skipped. Default is `FALSE`.
+#' @param status_file Character string. Optional path for the section status CSV. By default it is saved in `output_file_path`.
 #' @import dplyr
 #' @importFrom data.table as.data.table
 #' @import rgeoda
@@ -766,14 +961,45 @@ clusterComposer <- function(
                 d=1000,
                 epsg=3857,
                 n_cores=1,
-                delete_temp_files=TRUE
+                delete_temp_files=TRUE,
+                warn_features_per_section=Inf,
+                max_features_per_section=Inf,
+                section_timeout=Inf,
+                resume=FALSE,
+                merge_partial=FALSE,
+                status_file=NULL
 ){
 
-  # check number of cores specified by user does not exceed those available
+  if (!is.numeric(n_cores) || length(n_cores) != 1 || is.na(n_cores) || n_cores < 1) {
+    stop("`n_cores` must be a single number greater than or equal to 1.", call. = FALSE)
+  }
+  n_cores <- as.integer(n_cores)
   available_cores <- parallel::detectCores()
-  if(n_cores > available_cores){
+  if (!is.na(available_cores) && n_cores > available_cores) {
     message("Requested ", n_cores, " cores, but only ", available_cores, " are available. Using ", available_cores, " cores.")
     n_cores <- available_cores
+  }
+
+  thresholds <- list(
+    warn_features_per_section = warn_features_per_section,
+    max_features_per_section = max_features_per_section,
+    section_timeout = section_timeout
+  )
+  invalid_threshold <- vapply(thresholds, function(value) {
+    !is.numeric(value) || length(value) != 1 || is.na(value) || value < 0
+  }, logical(1))
+  if (any(invalid_threshold)) {
+    stop(
+      "`", names(thresholds)[which(invalid_threshold)[1]],
+      "` must be a single non-negative number.",
+      call. = FALSE
+    )
+  }
+  if (!is.logical(resume) || length(resume) != 1 || is.na(resume)) {
+    stop("`resume` must be TRUE or FALSE.", call. = FALSE)
+  }
+  if (!is.logical(merge_partial) || length(merge_partial) != 1 || is.na(merge_partial)) {
+    stop("`merge_partial` must be TRUE or FALSE.", call. = FALSE)
   }
 
   # check pop values are suitable
@@ -792,68 +1018,110 @@ clusterComposer <- function(
 
   # set up a temporary folder to store intermediary section files
   temp_folder <- file.path(output_file_path, paste0(run_id, "_temp"))
-  dir.create(temp_folder, showWarnings = FALSE)
-  if (isTRUE(delete_temp_files)){
-    on.exit(unlink(temp_folder, recursive = TRUE, force = TRUE), add = TRUE)
+  dir.create(temp_folder, recursive = TRUE, showWarnings = FALSE)
+  if (is.null(status_file)) {
+    status_file <- file.path(output_file_path, paste0(run_id, "_section_status.csv"))
+  }
+  manifest_file <- file.path(output_file_path, paste0(run_id, "_manifest.csv"))
+  cleanup_temp <- FALSE
+  on.exit({
+    if (isTRUE(delete_temp_files) && cleanup_temp) {
+      unlink(temp_folder, recursive = TRUE, force = TRUE)
+    }
+  }, add = TRUE)
+
+  message("Running section preflight checks.")
+  status <- .preflight_sections(
+    aoi = aoi,
+    bf_file_path = bf_file_path,
+    run_id = run_id,
+    temp_folder = temp_folder
+  )
+  warn_rows <- which(status$feature_count > warn_features_per_section)
+  if (length(warn_rows) > 0) {
+    warning(
+      length(warn_rows), " section(s) exceed `warn_features_per_section`: ",
+      paste(status$section_id[warn_rows], collapse = ", "),
+      call. = FALSE
+    )
+  }
+  skip_rows <- which(status$feature_count > max_features_per_section)
+  if (length(skip_rows) > 0) {
+    status$status[skip_rows] <- "skipped"
+    status$error_message[skip_rows] <- paste0(
+      "Feature count exceeds max_features_per_section (",
+      max_features_per_section,
+      ")."
+    )
   }
 
-  # set up parallel processing
-  cl <- parallel::makeCluster(n_cores)
-  on.exit(parallel::stopCluster(cl), add = TRUE)
-  parallel::clusterEvalQ(cl, {
-    library(sf)
-    library(stars)
-    library(dendextend)
-    library(dplyr)
-    library(data.table)
-    library(rgeoda)
-    library(igraph)
-  })
-  parallel::clusterExport(
-    cl,
-    varlist = c(
-      "aoi",
-      "bf_file_path",
-      "run_id",
-      "output_file_path",
-      "pop_per_EZ",
-      "max_pop_per_EZ",
-      "min_pop_per_EZ",
-      "initial_buffer_dist_max",
-      "initial_buffer_dist_min",
-      "d",
-      "epsg",
-      "temp_folder",
-      ".cluster_section"
-    ),envir = environment()
-  )
-  invisible(parallel::parLapplyLB(
-    cl,
-    aoi$section_id,
-    function(section) {
-      .cluster_section(
-        section = section,
-        aoi = aoi,
-        bf_file_path = bf_file_path,
-        run_id = run_id,
-        pop_per_EZ = pop_per_EZ,
-        max_pop_per_EZ = max_pop_per_EZ,
-        min_pop_per_EZ = min_pop_per_EZ,
-        initial_buffer_dist_max = initial_buffer_dist_max,
-        initial_buffer_dist_min = initial_buffer_dist_min,
-        d = d,
-        epsg = epsg,
-        temp_folder = temp_folder
+  if (isTRUE(resume)) {
+    resume_rows <- which(status$status == "pending" & file.exists(status$temp_output_path))
+    for (row_index in resume_rows) {
+      validation <- .validate_section_output(
+        status$temp_output_path[row_index],
+        status$section_id[row_index],
+        sf::st_crs(aoi)
       )
-    },
-    chunk.size = 1L
-  ))
+      if (validation$valid) {
+        status$status[row_index] <- "completed"
+        status$resumed[row_index] <- TRUE
+        status$elapsed_seconds[row_index] <- 0
+      }
+    }
+  }
+  .write_section_status(status, status_file)
 
-  temp_files <- list.files(temp_folder,pattern = "\\.gpkg$",full.names = TRUE)
+  worker_arguments <- list(
+    aoi = aoi,
+    bf_file_path = bf_file_path,
+    run_id = run_id,
+    pop_per_EZ = pop_per_EZ,
+    max_pop_per_EZ = max_pop_per_EZ,
+    min_pop_per_EZ = min_pop_per_EZ,
+    initial_buffer_dist_max = initial_buffer_dist_max,
+    initial_buffer_dist_min = initial_buffer_dist_min,
+    d = d,
+    epsg = epsg,
+    temp_folder = temp_folder
+  )
+  rows_to_run <- which(status$status == "pending")
+  if (length(rows_to_run) > 0) {
+    status <- .run_section_processes(
+      status = status,
+      row_indices = rows_to_run,
+      worker_arguments = worker_arguments,
+      n_cores = n_cores,
+      section_timeout = section_timeout,
+      status_file = status_file,
+      expected_crs = sf::st_crs(aoi)
+    )
+  }
+
+  failed_rows <- which(status$status != "completed")
+  completed_rows <- which(status$status == "completed")
+  status$included_in_merge[completed_rows] <- length(failed_rows) == 0 || isTRUE(merge_partial)
+  .write_section_status(status, status_file)
+  utils::write.csv(status, manifest_file, row.names = FALSE, na = "")
+
+  if (length(failed_rows) > 0 && !isTRUE(merge_partial)) {
+    stop(
+      length(failed_rows), " section(s) did not complete. Successful temporary outputs were retained. ",
+      "See ", status_file, ". Set `resume = TRUE` to retry, or `merge_partial = TRUE` to merge completed sections.",
+      call. = FALSE
+    )
+  }
+  if (length(completed_rows) == 0) {
+    stop("No sections completed successfully; no final output was written.", call. = FALSE)
+  }
+
+  temp_files <- sort(status$temp_output_path[completed_rows])
   cluster_polys <- lapply(temp_files, sf::st_read, quiet = TRUE)
   cluster_polys <- do.call(rbind, cluster_polys)
   cluster_polys$ID <- 1:nrow(cluster_polys)
   cluster_polys_path <- file.path(output_file_path,paste0(run_id, "_clusters.gpkg"))
   st_write(cluster_polys, cluster_polys_path, append = FALSE)
+  cleanup_temp <- TRUE
+  invisible(cluster_polys_path)
 
 }

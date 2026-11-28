@@ -17,7 +17,13 @@ clusterComposer(
   d = 1000,
   epsg = 3857,
   n_cores = 1,
-  delete_temp_files = TRUE
+  delete_temp_files = TRUE,
+  warn_features_per_section = Inf,
+  max_features_per_section = Inf,
+  section_timeout = Inf,
+  resume = FALSE,
+  merge_partial = FALSE,
+  status_file = NULL
 )
 }
 \arguments{
@@ -46,6 +52,18 @@ clusterComposer(
 \item{n_cores}{Numeric, single number. Default is 1. The number of computer cores you would like for processing. Recommend using your total number of cores minus 1. Use parallel::detectCores() to find the total number of cores available on your computer.}
 
 \item{delete_temp_files}{Logical. Default is TRUE. If `TRUE`, intermediate files are deleted when the function exits. If `FALSE`, they are retained.}
+
+\item{warn_features_per_section}{Numeric. Warn before processing sections with more building features than this. Default is `Inf`.}
+
+\item{max_features_per_section}{Numeric. Skip sections with more building features than this. Default is `Inf`.}
+
+\item{section_timeout}{Numeric. Maximum processing time in seconds for each section. Default is `Inf`.}
+
+\item{resume}{Logical. If `TRUE`, reuse valid existing section outputs. Default is `FALSE`.}
+
+\item{merge_partial}{Logical. If `TRUE`, merge successful section outputs even when other sections fail, time out, or are skipped. Default is `FALSE`.}
+
+\item{status_file}{Character string. Optional path for the section status CSV. By default it is saved in `output_file_path`.}
 }
 \description{
 Generate Bespoke Spatial Sampling Frames from Buildings
