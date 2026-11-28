@@ -3,6 +3,17 @@ utils::globalVariables(c(
   "group_id", "overlap_group", "pop", "pop_building"
 ))
 
+.shared_border_neighbours <- function(polygons, source_index, neighbour_indices) {
+  has_shared_border <- vapply(neighbour_indices, function(neighbour_index) {
+    shared <- st_intersection(
+      st_boundary(st_make_valid(st_geometry(polygons[source_index, ]))),
+      st_boundary(st_make_valid(st_geometry(polygons[neighbour_index, ])))
+    )
+    sum(as.numeric(st_length(shared))) > 0
+  }, logical(1))
+  neighbour_indices[has_shared_border]
+}
+
 .cluster_section <- function(
     section,
     aoi,
@@ -156,7 +167,10 @@ utils::globalVariables(c(
   st_geometry(bld_sets) <- adjusted_geometry
   bld_sets <- bld_sets[!st_is_empty(bld_sets), ]
   bld_sets <- st_make_valid(bld_sets)
-  rm(poly_area,area_order,adjusted_geometry,i,k,smaller,overlapping_smaller)
+  rm(list = intersect(
+    c("poly_area", "area_order", "adjusted_geometry", "i", "k", "smaller", "overlapping_smaller"),
+    ls()
+  ))
   # calculate pop for each polygon
   matches <- st_within(st_centroid(bf), bld_sets)
   bf$overlap_group <- vapply(matches, function(x) if(length(x)) bld_sets$overlap_group[x[1]] else NA_integer_, integer(1))
@@ -172,9 +186,14 @@ utils::globalVariables(c(
 
   ### STEP 3: apply hierarchical clustering to combine building collections to meet target population
 
-  # distance to neighbours
-
-  dist_mat <- st_distance(bld_sets)
+  if (nrow(bld_sets) == 1L) {
+    bld_sets$cid <- 1L
+    bld_sets$ptid <- 1L
+    bld_sets_dt <- data.table::as.data.table(bld_sets)
+    final_clustpts_list <- list(1L)
+  } else {
+    # distance to neighbours
+    dist_mat <- st_distance(bld_sets)
   dst <- stats::as.dist(dist_mat)
   clust <- stats::hclust(dst, method = 'ward.D2')
   rm(dist_mat,dst)
@@ -250,6 +269,7 @@ utils::globalVariables(c(
     rm(clustpts_list)
   }
   rm(list = intersect(c("big_clust", "clid", "nil", "restricted_clust"), ls()))
+  }
   cid_dt <- data.table::data.table(ptid = unlist(final_clustpts_list),
                                    cid = unlist(lapply(1:length(lengths(final_clustpts_list)), function(clusterid){
                                      rep(clusterid, length(final_clustpts_list[[clusterid]]))
@@ -261,7 +281,10 @@ utils::globalVariables(c(
   bld_sets_temp <- st_as_sf(bld_sets_dt, sf_column_name = "x")
   cluster_pops <- aggregate(pop ~ cid, data = bld_sets_temp, FUN = sum, na.rm = TRUE)
   bld_sets_temp <- merge(bld_sets_temp, cluster_pops, "cid")
-  rm(big_clusts, dend_list,final_clustpts_list,cid_dt,bld_sets_dt,cluster_pops)
+  rm(list = intersect(
+    c("big_clusts", "dend_list", "final_clustpts_list", "cid_dt", "bld_sets_dt", "cluster_pops"),
+    ls()
+  ))
   # unionise polygons for each cid
   hclusters <- bld_sets_temp |>
     group_by(cid) |>
@@ -376,7 +399,15 @@ utils::globalVariables(c(
     }
   }
   corner_extensions <- st_sfc(corner_extensions, crs = st_crs(hclusters_rectangles_full))
-  rm(i, coords, centre, other_rectangles, other_boundaries, j, a, b, midpoint, direction, side_length, normal, corner, corner_point, corner_overlaps, targets, ray, hits, hit_coords, distances, valid, nearest, hit, unit_direction)
+  rm(list = intersect(
+    c(
+      "i", "coords", "centre", "other_rectangles", "other_boundaries", "j", "a", "b",
+      "midpoint", "direction", "side_length", "normal", "corner", "corner_point",
+      "corner_overlaps", "targets", "ray", "hits", "hit_coords", "distances",
+      "valid", "nearest", "hit", "unit_direction"
+    ),
+    ls()
+  ))
   # extend all lines close to section edge to create small empty polygons that can be merged to correct polygon
   # convert all boundaries to LINESTRING
   b <- st_boundary(hclusters_adj_rectangles)$x
@@ -487,13 +518,7 @@ utils::globalVariables(c(
     nbr_idx <- st_intersects(polys[i, ], polys)[[1]]
     nbr_idx <- setdiff(nbr_idx, i)
     # only keep neighbours with a shared border, i.e. don't keep if just touching at a point
-    nbr_idx <- nbr_idx[sapply(nbr_idx, function(j) {
-      shared <- st_intersection(
-        st_boundary(st_make_valid(st_geometry(polys[i, ]))),
-        st_boundary(st_make_valid(st_geometry(polys[j, ])))
-      )
-      sum(as.numeric(st_length(shared))) > 0
-    })]
+    nbr_idx <- .shared_border_neighbours(polys, i, nbr_idx)
     # only keep neighbours with non-0 pop (after previous clean up of small area non-0 polygons, there should only be large non-0 pop areas now)
     nbr_idx <- nbr_idx[polys$pop_sum[nbr_idx] > 0]
     # if no neighbours, take i off the list to process
