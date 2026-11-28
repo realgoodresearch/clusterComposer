@@ -44,6 +44,11 @@ workflow, engineering, testing, or release rule.
 3. Keep the issue current with very brief comments at important planning and
    verified implementation milestones. Record enough decisions, validation,
    and next steps that another contributor can resume without extra prompting.
+   Keep comments scoped to development work in this repository. Include
+   downstream project evidence only when it is directly relevant diagnostic
+   information; omit that project's operational plans and next steps. Format
+   comments with actual Markdown line breaks, never literal escape sequences
+   such as `\n`, and verify that comments are readable after writing them.
 4. Keep changes focused on one coherent outcome. Do not mix behavior changes
    with unrelated cleanup, refactoring, formatting, or generated artifacts.
 5. Commit at meaningful, verified milestones with concise imperative subjects.
